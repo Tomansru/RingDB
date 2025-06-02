@@ -91,7 +91,9 @@ func (r *RingDB) Upsert(e *Entity) error {
 		return ErrNilEntity
 	}
 
-	<-r.rate.C
+	if r.rate != nil {
+		<-r.rate.C
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
