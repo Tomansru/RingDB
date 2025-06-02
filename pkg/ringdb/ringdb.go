@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/btree"
 
-	"btree/pkg/vlog"
+	"github.com/tomansru/ringdb/pkg/vlog"
 )
 
 type RingDB struct {

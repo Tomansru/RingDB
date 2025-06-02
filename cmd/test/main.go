@@ -9,7 +9,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 
-	"btree/pkg/ringdb"
+	"github.com/tomansru/ringdb/pkg/ringdb"
 )
 
 func main() {

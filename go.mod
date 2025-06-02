@@ -1,4 +1,4 @@
-module btree
+module github.com/tomansru/ringdb
 
 go 1.24
 
