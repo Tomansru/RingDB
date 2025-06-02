@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -45,6 +46,8 @@ func NewVlog(path string, size int) (*Vlog, error) {
 	if size <= 100*MiByte {
 		return nil, errors.New("vlog size must be greater than 100 MiB")
 	}
+
+	path = filepath.Join(path, "ring.vlog")
 
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
