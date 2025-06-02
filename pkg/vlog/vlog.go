@@ -47,6 +47,11 @@ func NewVlog(path string, size int) (*Vlog, error) {
 		return nil, errors.New("vlog size must be greater than 100 MiB")
 	}
 
+	err := createDir(path)
+	if err != nil {
+		return nil, err
+	}
+
 	path = filepath.Join(path, "ring.vlog")
 
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0644)
@@ -295,4 +300,29 @@ func (v *Vlog) Metrics() Metrics {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.metrics
+}
+
+func createDir(path string) error {
+	dirExists, err := exists(path)
+	if err != nil {
+		return err
+	}
+	if !dirExists {
+		err = os.MkdirAll(path, 0700)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func exists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return true, err
 }

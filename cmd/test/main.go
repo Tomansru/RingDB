@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	const filePath = "./vlog.vlog"
+	const filePath = "./vlog"
 	const maxSize = 4 * humanize.GiByte
 
 	db, err := ringdb.NewRingDB(filePath, maxSize, 64, 100*time.Microsecond)
