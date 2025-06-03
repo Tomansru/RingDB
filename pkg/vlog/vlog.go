@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/tomansru/ringdb/pkg/pool"
 )
 
 // IEC Sizes.
 const (
-	Byte = 1 << (iota * 10)
+	Byte = 1 << (iota * 10) // 2 ^ (iota(0) * 10)
 	KiByte
 	MiByte
 	GiByte
@@ -27,6 +29,22 @@ const (
 	headerSize    = 16 // 4 (keyLen) + 4 (valLen) + 8 (timestamp)
 	syncThreshold = 64 * MiByte
 )
+
+type buffer []byte
+
+var _pool = pool.NewNil[buffer]()
+
+func _get(size int) buffer {
+	b := _pool.Get()
+	if cap(b) < size {
+		return make(buffer, size)
+	}
+	return b[:size]
+}
+
+func (b buffer) free() {
+	_pool.Put(b[:0])
+}
 
 type Vlog struct {
 	file *os.File
@@ -131,15 +149,6 @@ func (v *Vlog) Write(key, value []byte) (overwrittenKeys [][]byte, recordOffset 
 	v.tail = tail
 	v.off = nextOff
 
-	// TODO I think it should be platform independent, but not now
-	v.bytesWritten += totalSize
-	if v.bytesWritten >= syncThreshold {
-		if err := unix.Msync(v.data, unix.MS_SYNC); err != nil {
-			panic(err)
-		}
-		v.bytesWritten = 0
-	}
-
 	v.metrics.BytesWritten += uint64(totalSize)
 	v.metrics.ObjectsWritten++
 	v.metrics.ObjectsCount++
@@ -158,9 +167,9 @@ func (v *Vlog) freeSpace() int {
 	return v.tail - v.off
 }
 
-// writeRaw writes a record at the given offset
+// writeRawMMap writes a record at the given offset
 // returns the record offset and next write offset
-func (v *Vlog) writeRaw(off int, key, value []byte) (int, int) {
+func (v *Vlog) writeRawMMap(off int, key, value []byte) (int, int) {
 	recordOffset := off
 	totalSize := headerSize + len(key) + len(value)
 	end := off + totalSize
@@ -187,6 +196,53 @@ func (v *Vlog) writeRaw(off int, key, value []byte) (int, int) {
 
 	copy(v.data[off:], tmp[:remain])
 	copy(v.data, tmp[remain:])
+
+	v.bytesWritten += totalSize
+	if v.bytesWritten >= syncThreshold {
+		err := unix.Msync(v.data, unix.MS_SYNC)
+		assert(err)
+		v.bytesWritten = 0
+	}
+
+	return recordOffset, end % v.size
+}
+
+// writeRaw writes a record at the given offset
+// returns the record offset and next write offset
+func (v *Vlog) writeRaw(off int, key, value []byte) (int, int) {
+	recordOffset := off
+	totalSize := headerSize + len(key) + len(value)
+	end := off + totalSize
+	ts := time.Now().UnixMilli()
+
+	//buf := make([]byte, totalSize)
+	buf := _get(totalSize)
+	defer buf.free()
+	binary.BigEndian.PutUint32(buf[0:], uint32(len(key)))
+	binary.BigEndian.PutUint32(buf[4:], uint32(len(value)))
+	binary.BigEndian.PutUint64(buf[8:], uint64(ts))
+	copy(buf[headerSize:], key)
+	copy(buf[headerSize+len(key):], value)
+
+	if end <= v.size {
+		_, _ = v.file.WriteAt(buf, int64(off))
+		return recordOffset, end % v.size
+	}
+
+	v.metrics.OverwriteCycles++
+
+	remain := v.size - off
+	_, err := v.file.WriteAt(buf[:remain], int64(off))
+	assert(err)
+	_, err = v.file.WriteAt(buf[remain:], 0)
+	assert(err)
+
+	v.bytesWritten += totalSize
+	if v.bytesWritten >= syncThreshold {
+		err = v.file.Sync()
+		assert(err)
+		v.bytesWritten = 0
+	}
 
 	return recordOffset, end % v.size
 }
@@ -325,4 +381,10 @@ func exists(path string) (bool, error) {
 		return false, nil
 	}
 	return true, err
+}
+
+func assert(err error) {
+	if err != nil {
+		panic(err)
+	}
 }
