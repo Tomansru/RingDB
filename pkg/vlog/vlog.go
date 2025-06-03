@@ -10,8 +10,6 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-
-	"github.com/tomansru/ringdb/pkg/pool"
 )
 
 // IEC Sizes.
@@ -32,14 +30,18 @@ const (
 
 type buffer []byte
 
-var _pool = pool.NewNil[buffer]()
+var _pool = sync.Pool{}
 
 func _get(size int) buffer {
 	b := _pool.Get()
-	if cap(b) < size {
+	if b == nil {
 		return make(buffer, size)
 	}
-	return b[:size]
+	buf := b.(buffer)
+	if cap(buf) < size {
+		return make(buffer, size)
+	}
+	return buf[:size]
 }
 
 func (b buffer) free() {
@@ -61,8 +63,8 @@ type Vlog struct {
 
 func NewVlog(path string, size int) (*Vlog, error) {
 	// TODO: I want to have minimal available size for the vlog.
-	if size <= 100*MiByte {
-		return nil, errors.New("vlog size must be greater than 100 MiB")
+	if size <= 124*MiByte {
+		return nil, errors.New("vlog size must be greater than 124 MiB")
 	}
 
 	err := createDir(path)
