@@ -225,7 +225,8 @@ func (v *Vlog) writeRaw(off int, key, value []byte) (int, int) {
 	copy(buf[headerSize+len(key):], value)
 
 	if end <= v.size {
-		_, _ = v.file.WriteAt(buf, int64(off))
+		_, err := v.file.WriteAt(buf, int64(off))
+		assert(err)
 		return recordOffset, end % v.size
 	}
 
