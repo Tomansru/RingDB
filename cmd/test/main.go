@@ -16,16 +16,19 @@ func main() {
 	const filePath = "./vlog"
 	const maxSize = 4 * humanize.GiByte
 
-	db, err := ringdb.NewRingDB(filePath, maxSize, 64, 100*time.Microsecond)
+	db, err := ringdb.NewRingDB(filePath, maxSize, 64, 0)
 	if err != nil {
 		fmt.Printf("Error creating RingDB: %v\n", err)
 		return
 	}
 	defer db.Close()
 
+	var durationSum time.Duration
+	var count int
+
 	var now time.Time
 	// Пишем несколько раз
-	for i := 0; i < 1_200_000; i++ {
+	for i := 0; i < 200_000; i++ {
 		now = time.Now()
 
 		key := fmt.Sprintf("key_%06d", i)
@@ -38,16 +41,13 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("%03d: elapsed: %s\n", i, time.Since(now))
+		//fmt.Printf("%03d: elapsed: %s\n", i, time.Since(now))
+		durationSum += time.Since(now)
+		count++
 	}
 
-	now = time.Now()
-	res, _ := db.ReadPrefix("key_100")
-	fmt.Printf("%03d: elapsed: %s\n", len(res), time.Since(now))
-
-	now = time.Now()
-	res, _ = db.ReadPrefix("key_400")
-	fmt.Printf("%03d: elapsed: %s\n", len(res), time.Since(now))
+	fmt.Printf("Elapsed time: %s\n", durationSum)
+	fmt.Printf("Average time per upsert: %s\n", durationSum/time.Duration(count))
 
 	m := db.VlogMetrics()
 	data, _ := json.Marshal(&m)
@@ -70,7 +70,7 @@ func main() {
 
 // GenJunk40KBPattern returns a 40 KB []byte of repeating pattern (fast, reproducible).
 func GenJunk40KBPattern() []byte {
-	const size = 4 * 1024
+	const size = 40 * 1024
 	pattern := []byte("junk")
 	buf := bytes.Repeat(pattern, size/len(pattern))
 	buf = append(buf, pattern[:size%len(pattern)]...)

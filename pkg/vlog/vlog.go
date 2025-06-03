@@ -175,31 +175,40 @@ func (v *Vlog) writeRawMMap(off int, key, value []byte) (int, int) {
 	end := off + totalSize
 	ts := time.Now().UnixMilli()
 
+	v.bytesWritten += totalSize
+
 	if end <= v.size {
 		binary.BigEndian.PutUint32(v.data[off:], uint32(len(key)))
 		binary.BigEndian.PutUint32(v.data[off+4:], uint32(len(value)))
 		binary.BigEndian.PutUint64(v.data[off+8:], uint64(ts))
 		copy(v.data[off+headerSize:], key)
 		copy(v.data[off+headerSize+len(key):], value)
+
+		if v.bytesWritten >= syncThreshold {
+			err := unix.Msync(v.data, unix.MS_ASYNC)
+			assert(err)
+			v.bytesWritten = 0
+		}
+
 		return recordOffset, end % v.size
 	}
 
 	v.metrics.OverwriteCycles++
 
 	remain := v.size - off
-	tmp := make([]byte, totalSize)
-	binary.BigEndian.PutUint32(tmp, uint32(len(key)))
-	binary.BigEndian.PutUint32(tmp[4:], uint32(len(value)))
-	binary.BigEndian.PutUint64(tmp[8:], uint64(ts))
-	copy(tmp[headerSize:], key)
-	copy(tmp[headerSize+len(key):], value)
+	buf := _get(totalSize)
+	defer buf.free()
+	binary.BigEndian.PutUint32(buf, uint32(len(key)))
+	binary.BigEndian.PutUint32(buf[4:], uint32(len(value)))
+	binary.BigEndian.PutUint64(buf[8:], uint64(ts))
+	copy(buf[headerSize:], key)
+	copy(buf[headerSize+len(key):], value)
 
-	copy(v.data[off:], tmp[:remain])
-	copy(v.data, tmp[remain:])
+	copy(v.data[off:], buf[:remain])
+	copy(v.data, buf[remain:])
 
-	v.bytesWritten += totalSize
 	if v.bytesWritten >= syncThreshold {
-		err := unix.Msync(v.data, unix.MS_SYNC)
+		err := unix.Msync(v.data, unix.MS_ASYNC)
 		assert(err)
 		v.bytesWritten = 0
 	}
@@ -215,7 +224,6 @@ func (v *Vlog) writeRaw(off int, key, value []byte) (int, int) {
 	end := off + totalSize
 	ts := time.Now().UnixMilli()
 
-	//buf := make([]byte, totalSize)
 	buf := _get(totalSize)
 	defer buf.free()
 	binary.BigEndian.PutUint32(buf[0:], uint32(len(key)))
@@ -224,9 +232,18 @@ func (v *Vlog) writeRaw(off int, key, value []byte) (int, int) {
 	copy(buf[headerSize:], key)
 	copy(buf[headerSize+len(key):], value)
 
+	v.bytesWritten += totalSize
+
 	if end <= v.size {
 		_, err := v.file.WriteAt(buf, int64(off))
 		assert(err)
+
+		if v.bytesWritten >= syncThreshold {
+			err = v.file.Sync()
+			assert(err)
+			v.bytesWritten = 0
+		}
+
 		return recordOffset, end % v.size
 	}
 
@@ -238,7 +255,6 @@ func (v *Vlog) writeRaw(off int, key, value []byte) (int, int) {
 	_, err = v.file.WriteAt(buf[remain:], 0)
 	assert(err)
 
-	v.bytesWritten += totalSize
 	if v.bytesWritten >= syncThreshold {
 		err = v.file.Sync()
 		assert(err)
@@ -262,7 +278,9 @@ func (v *Vlog) Read(offset int) (nextOffset int, key, value []byte) {
 // readRaw reads a record at the given offset
 // returns the next record offset, key, and value
 func (v *Vlog) readRaw(off int) (int, []byte, []byte) {
-	header := make([]byte, headerSize)
+	header := _get(headerSize)
+	defer header.free()
+
 	if off+headerSize <= v.size {
 		copy(header, v.data[off:off+headerSize])
 	} else {
@@ -300,7 +318,9 @@ func (v *Vlog) readRaw(off int) (int, []byte, []byte) {
 // readRawKey same as readRaw, but only reads header and the key
 // returns the next record offset, the key and record timestamp in milliseconds
 func (v *Vlog) readRawKey(off int) (int, []byte, int64) {
-	header := make([]byte, headerSize)
+	header := _get(headerSize)
+	defer header.free()
+
 	if off+headerSize <= v.size {
 		copy(header, v.data[off:off+headerSize])
 	} else {
